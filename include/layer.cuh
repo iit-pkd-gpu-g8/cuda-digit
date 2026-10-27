@@ -56,6 +56,6 @@ __global__ void BackwardCLBias(float bias[6], float g_pre_values[6][24][24]);
 
 // Utilities
 __device__ float Activate(float value); // sigmoid activation function
-__global__ void ApplyActivate(float* input, float* output, int size);
+__global__ void ApplyActivate(float* input, float* output, int N);
 __global__ void ComputeError(float* error, float* output, unsigned int Y, const int N); 
 __global__ void ApplyGradient(float* output, float* grad, int N);
