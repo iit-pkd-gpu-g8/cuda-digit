@@ -1,3 +1,6 @@
+// Learning rate used by the backward bias updates
+static const float dt = 1.0E-01f;
+
 // Utilities
 __device__ float Activate(float value) { return 1 / (1 + exp(-value)); }
 
@@ -126,4 +129,206 @@ __global__ void ForwardFCLBias(float pre_values[10], float bias[10]) {
   for (int index = N * position / size; index < N * (position + 1) / size;
        index++)
     pre_values[index] += bias[index];
+}
+
+// Backward Propogation
+// FullyConnected Layer 
+__global__ void BackwardFCLWeight(float g_weight[10][6][6][6],
+                                  float g_pre_values[10],
+                                  float p_output[6][6][6]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 10 * 6 * 6 * 6;
+
+  // Compute weight gradients
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 10);
+    const int i2 = ((index /= 10) % 6);
+    const int i3 = ((index /= 6) % 6);
+    const int i4 = ((index /= 6) % 6);
+
+    g_weight[i1][i2][i3][i4] = g_pre_values[i1] * p_output[i2][i3][i4];
+  }
+}
+
+__global__ void BackwardFCLBias(float bias[10], float g_pre_values[10]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 10;
+
+  // Update bias with gradients
+  for (int index = N * position / size; index < N * (position + 1) / size;
+       ++index)
+    bias[index] += dt * g_pre_values[index];
+}
+
+// Pooling Layer 
+__global__ void BackwardPLOutput(float g_output[6][6][6],
+                                 float n_weight[10][6][6][6],
+                                 float ng_pre_values[10]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 10 * 6 * 6 * 6;
+
+  // Propagate error backward from the next (FC) layer
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 10);
+    const int i2 = ((index /= 10) % 6);
+    const int i3 = ((index /= 6) % 6);
+    const int i4 = ((index /= 6) % 6);
+
+    atomicAdd(&g_output[i2][i3][i4],
+              n_weight[i1][i2][i3][i4] * ng_pre_values[i1]);
+  }
+}
+
+__global__ void BackwardPLPreActivate(float g_pre_values[6][6][6],
+                                      float g_output[6][6][6],
+                                      float pre_values[6][6][6]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 6 * 6 * 6;
+
+  // Gradient of pre-activation 
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 6);
+    const int i2 = ((index /= 6) % 6);
+    const int i3 = ((index /= 6) % 6);
+
+    const float o = Activate(pre_values[i1][i2][i3]);
+
+    g_pre_values[i1][i2][i3] = g_output[i1][i2][i3] * o * (1 - o);
+  }
+}
+
+__global__ void BackwardPLWeight(float g_weight[1][4][4],
+                                 float g_pre_values[6][6][6],
+                                 float p_output[6][24][24]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 1 * 4 * 4 * 6 * 6 * 6;
+  const float d = powf(6.0f, 3.0f); // Normalization factor
+
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 1);
+    const int i2 = ((index /= 1) % 4);
+    const int i3 = ((index /= 4) % 4);
+    const int i4 = ((index /= 4) % 6);
+    const int i5 = ((index /= 6) % 6);
+    const int i6 = ((index /= 6) % 6);
+
+    atomicAdd(&g_weight[i1][i2][i3],
+              g_pre_values[i4][i5][i6] *
+                  p_output[i4][i5 * 4 + i2][i6 * 4 + i3] / d);
+  }
+}
+
+__global__ void BackwardPLBias(float bias[1], float g_pre_values[6][6][6]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 6 * 6 * 6;
+  const float d = powf(6.0f, 3.0f); // Normalization factor
+
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 6);
+    const int i2 = ((index /= 6) % 6);
+    const int i3 = ((index /= 6) % 6);
+
+    atomicAdd(&bias[0], dt * g_pre_values[i1][i2][i3] / d);
+  }
+}
+
+// Convolution Layer 
+__global__ void BackwardCLOutput(float g_output[6][24][24],
+                                 float n_weight[1][4][4],
+                                 float ng_pre_values[6][6][6]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 1 * 4 * 4 * 6 * 6 * 6;
+
+  // Propagate error backward from the next (pooling) layer
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 1);
+    const int i2 = ((index /= 1) % 4);
+    const int i3 = ((index /= 4) % 4);
+    const int i4 = ((index /= 4) % 6);
+    const int i5 = ((index /= 6) % 6);
+    const int i6 = ((index /= 6) % 6);
+
+    atomicAdd(&g_output[i4][i5 * 4 + i2][i6 * 4 + i3],
+              n_weight[i1][i2][i3] * ng_pre_values[i4][i5][i6]);
+  }
+}
+
+__global__ void BackwardCLPreActivate(float g_pre_values[6][24][24],
+                                      float g_output[6][24][24],
+                                      float pre_values[6][24][24]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 6 * 24 * 24;
+
+  // Gradient of pre-activation (sigmoid derivative)
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 6);
+    const int i2 = ((index /= 6) % 24);
+    const int i3 = ((index /= 24) % 24);
+
+    const float o = Activate(pre_values[i1][i2][i3]);
+
+    g_pre_values[i1][i2][i3] = g_output[i1][i2][i3] * o * (1 - o);
+  }
+}
+
+__global__ void BackwardCLWeight(float g_weight[6][5][5],
+                                 float g_pre_values[6][24][24],
+                                 float p_output[28][28]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 6 * 5 * 5 * 24 * 24;
+  const float d = powf(24.0f, 2.0f); // Normalization factor
+
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 6);
+    const int i2 = ((index /= 6) % 5);
+    const int i3 = ((index /= 5) % 5);
+    const int i4 = ((index /= 5) % 24);
+    const int i5 = ((index /= 24) % 24);
+
+    atomicAdd(&g_weight[i1][i2][i3],
+              g_pre_values[i1][i4][i5] * p_output[i4 + i2][i5 + i3] / d);
+  }
+}
+
+__global__ void BackwardCLBias(float bias[6], float g_pre_values[6][24][24]) {
+  const int position = blockIdx.x * blockDim.x + threadIdx.x;
+  const int size = blockDim.x * gridDim.x;
+
+  const int N = 6 * 24 * 24;
+  const float d = powf(24.0f, 2.0f); // Normalization factor
+
+  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
+    int index = n;
+    const int i1 = ((index /= 1) % 6);
+    const int i2 = ((index /= 6) % 24);
+    const int i3 = ((index /= 24) % 24);
+
+    atomicAdd(&bias[i1], dt * g_pre_values[i1][i2][i3] / d);
+  }
 }
