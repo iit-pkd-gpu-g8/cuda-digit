@@ -5,68 +5,69 @@ static const float dt = 1.0E-01f;
 
 // Layer structure functions
 Layer::Layer(int in_size, int on_size, int o_size) {
-    this->in_size = in_size;
-    this->on_size = on_size;
-    this->o_size = o_size;
-    
-    // host side staged biasses that is copied to layer on device memory
-    float s_bias[in_size];
-    float s_weight[in_size][on_size];
+  this->in_size = in_size;
+  this->on_size = on_size;
+  this->o_size = o_size;
 
-    output = NULL;
-    pre_values = NULL;
-    bias = NULL;
-    weight = NULL;
-    
-    // randomly generate bias and weight
-    for(int i = 0; i < in_size; i++) {
-        s_bias[i] = 0.5f - float(rand()) / float(RAND_MAX);
+  // host side staged biasses that is copied to layer on device memory
+  float s_bias[in_size];
+  float s_weight[in_size][on_size];
 
-        for(int j = 0; j < on_size; j++)
-            s_weight[i][j] = 0.5f - float(rand()) / float(RAND_MAX);
-    }
+  output = NULL;
+  pre_values = NULL;
+  bias = NULL;
+  weight = NULL;
 
-    // allocate device memory for layer variables
-    cudaMalloc(&this->output, sizeof(float) * on_size);
-    cudaMalloc(&this->pre_values, sizeof(float) * on_size);
-    cudaMalloc(&this->bias, sizeof(float) * in_size);
-    cudaMalloc(&this->weight, sizeof(float) * in_size * on_size);
-    cudaMalloc(&this->g_output, sizeof(float) * on_size);
-    cudaMalloc(&this->g_pre_values, sizeof(float) * on_size);
-    cudaMalloc(&this->g_weight, sizeof(float) * in_size * on_size);
+  // randomly generate bias and weight
+  for (int i = 0; i < in_size; i++) {
+    s_bias[i] = 0.5f - float(rand()) / float(RAND_MAX);
 
-    // copy bias and weight
-    cudaMemcpy(bias, s_bias, sizeof(float) * in_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(weight, s_weight, sizeof(float) * in_size * on_size, cudaMemcpyHostToDevice);
+    for (int j = 0; j < on_size; j++)
+      s_weight[i][j] = 0.5f - float(rand()) / float(RAND_MAX);
+  }
+
+  // allocate device memory for layer variables
+  cudaMalloc(&this->output, sizeof(float) * on_size);
+  cudaMalloc(&this->pre_values, sizeof(float) * on_size);
+  cudaMalloc(&this->bias, sizeof(float) * in_size);
+  cudaMalloc(&this->weight, sizeof(float) * in_size * on_size);
+  cudaMalloc(&this->g_output, sizeof(float) * on_size);
+  cudaMalloc(&this->g_pre_values, sizeof(float) * on_size);
+  cudaMalloc(&this->g_weight, sizeof(float) * in_size * on_size);
+
+  // copy bias and weight
+  cudaMemcpy(bias, s_bias, sizeof(float) * in_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(weight, s_weight, sizeof(float) * in_size * on_size,
+             cudaMemcpyHostToDevice);
 }
 
 Layer::~Layer() {
-    // free up device memory appropriately
-    cudaFree(output);
-    cudaFree(pre_values);
-    cudaFree(bias);
-    cudaFree(weight);
-    cudaFree(g_output);
-    cudaFree(g_pre_values);
-    cudaFree(g_weight);
+  // free up device memory appropriately
+  cudaFree(output);
+  cudaFree(pre_values);
+  cudaFree(bias);
+  cudaFree(weight);
+  cudaFree(g_output);
+  cudaFree(g_pre_values);
+  cudaFree(g_weight);
 }
 
 void Layer::SetOutput(float *data) {
-    // copy data as output for layer
-    cudaMemcpy(output, data, sizeof(float) * o_size, cudaMemcpyHostToDevice);
+  // copy data as output for layer
+  cudaMemcpy(output, data, sizeof(float) * o_size, cudaMemcpyHostToDevice);
 }
 
 void Layer::ForwardClear() {
-    // set each byte of forward array structures to zero
-    cudaMemset(output, 0, sizeof(float) * o_size);
-    cudaMemset(pre_values, 0, sizeof(float) * o_size);
+  // set each byte of forward array structures to zero
+  cudaMemset(output, 0, sizeof(float) * o_size);
+  cudaMemset(pre_values, 0, sizeof(float) * o_size);
 }
 
 void Layer::BackwardClear() {
-    // set each byte of backward array structures to zero
-    cudaMemset(g_output, 0, sizeof(float) * o_size);
-    cudaMemset(g_pre_values, 0, sizeof(float) * o_size);
-    cudaMemset(g_weight, 0, sizeof(float) * in_size * on_size);
+  // set each byte of backward array structures to zero
+  cudaMemset(g_output, 0, sizeof(float) * o_size);
+  cudaMemset(g_pre_values, 0, sizeof(float) * o_size);
+  cudaMemset(g_weight, 0, sizeof(float) * in_size * on_size);
 }
 
 // Utilities
