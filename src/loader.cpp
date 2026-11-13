@@ -43,7 +43,7 @@ Data GenData(char *train_data_path, char *train_label_path,
     exit(1);
   }
 
-  Image *train_img_set = malloc(data.train_size * sizeof(Image));
+  Image *train_img_set = (Image *)malloc(data.train_size * sizeof(Image));
 
   unsigned char buffer[data.row_size * data.col_size];
 
@@ -114,7 +114,7 @@ Data GenData(char *train_data_path, char *train_label_path,
     exit(1);
   }
 
-  Image *test_img_set = malloc(data.test_size * sizeof(Image));
+  Image *test_img_set = (Image *)malloc(data.test_size * sizeof(Image));
 
   unsigned char buffer2[data.row_size * data.col_size];
 

@@ -107,17 +107,39 @@ static unsigned int Decide(Image *image) {
   return label;
 }
 
-static void Learn() {}
+static void Learn() {
+  std::clog << "[LOG] Learning Process has begun" << std::endl;
+
+  for (int i = 0; i < data.train_size; i++) {
+    Image *image = &data.train_images[i];
+
+    std::clog << "[LOG] Training on label " << image->label << " | ";
+    ForwardPass(image);
+    std::clog << "Forward Pass Done | ";
+
+    ComputeError<<<N, N>>>(fcl.g_pre_values, fcl.output, image->label, 10);
+    std::clog << "Error Computed | ";
+
+    BackwardPass();
+    std::clog << "Backward Pass Done" << std::endl;
+  }
+}
 
 static float Test() {
+  std::clog << "[LOG] Testing Process has begun" << std::endl;
 
   int mispredictions = 0;
 
   for (int i = 0; i < data.test_size; i++) {
     Image *image = &data.test_images[i];
 
-    if (Decide(image) != image->label)
+    int prediction = Decide(image);
+
+    if (prediction != image->label)
       mispredictions++;
+
+    std::clog << "[LOG] Test " << i << ": label = " << image->label
+              << "| predicted = " << prediction << std::endl;
   }
 
   float accuracy =
@@ -148,7 +170,7 @@ void LoadData(const char *root) {
 int main(int argc, char **argv) {
 
   if (argc != 2) {
-    printf("Usage: %s <dataset-root>", argv[0]);
+    printf("Usage: %s <dataset-root>\n", argv[0]);
     return 1;
   }
 
