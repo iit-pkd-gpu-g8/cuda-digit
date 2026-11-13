@@ -37,7 +37,7 @@ Layer::Layer(int in_size, int on_size, int o_size) {
 
     // copy bias and weight
     cudaMemcpy(bias, s_bias, sizeof(float) * in_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(bias, s_weight, sizeof(float) * in_size * on_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(weight, s_weight, sizeof(float) * in_size * on_size, cudaMemcpyHostToDevice);
 }
 
 Layer::~Layer() {
