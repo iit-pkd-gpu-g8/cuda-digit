@@ -14,6 +14,29 @@ __device__ void ApplyActivate(float *input, float *output, int N) {
     output[index] = Activate(input[index]);
 }
 
+__global__ void ComputeError(float* error, float* output, unsigned int Y, const int N)
+{
+	const int pos = blockDim.x * blockIdx.x + threadIdx.x;
+	const int size = blockDim.x * gridDim.x;
+
+	for(int i = N* pos/size;i< N*(pos+1)/size;++i)
+	{
+		error[i]=((Y==i ? 1.0f : 0.0f) - output[i]);
+	}
+
+}
+
+__global__ void ApplyGradient(float* output, float* grad, int N)
+{
+	const int pos = blockDim.x * blockIdx.x + threadIdx.x;
+	const int size = blockDim.x * gridDim.x;
+
+	for(int i = N* pos/size;i< N*(pos+1)/size;++i)
+	{
+		output[i] +=dt * grad[i];
+	}
+}
+
 // CUDA Kernels
 // Forward Propogation
 __global__ void ForwardCLPreActivate(float input[28][28],
