@@ -10,7 +10,7 @@
 Layer il = Layer(0, 0, 28 * 28);         // input layer
 Layer cl = Layer(5 * 5, 6, 6 * 24 * 24); // convolutional layer
 Layer pl = Layer(4 * 4, 1, 6 * 6 * 6);   // pooling layer
-Layer fcl = Layer(6 * 6 * 6, 10, 10);          // fully connected layer
+Layer fcl = Layer(6 * 6 * 6, 10, 10);    // fully connected layer
 
 Data data; // variable into which the data set is loaded
 
@@ -47,7 +47,6 @@ static void ForwardPass(Image *image) {
 }
 
 static void BackwardPass() {
-
 
   // Backward Propogation
 
@@ -115,22 +114,22 @@ static void Learn(unsigned train_intensity) {
   std::clog << "[LOG] Learning Process has begun" << std::endl;
 
   unsigned int round = 0;
-  while(train_intensity > 0) {
-      std::clog << "Training Round " << round++ << std::endl;
+  while (train_intensity > 0) {
+    std::clog << "Training Round " << round++ << std::endl;
 
-      for (int i = 0; i < data.train_size; i++) {
-        Image *image = &data.train_images[i];
+    for (int i = 0; i < data.train_size; i++) {
+      Image *image = &data.train_images[i];
 
-        ForwardPass(image);
-        
-        // clear gradients before computing error
-        ClearGradients();
-        ComputeError<<<10, 1>>>(fcl.g_pre_values, fcl.output, image->label, 10);
+      ForwardPass(image);
 
-        BackwardPass();
-      }
+      // clear gradients before computing error
+      ClearGradients();
+      ComputeError<<<10, 1>>>(fcl.g_pre_values, fcl.output, image->label, 10);
 
-      train_intensity--;
+      BackwardPass();
+    }
+
+    train_intensity--;
   }
 }
 
@@ -177,16 +176,16 @@ void LoadData(const char *root) {
 }
 
 int main(int argc, char **argv) {
-    
+
   if (argc != 2 && argc != 3) {
     printf("Usage: %s <dataset-root>\n", argv[0]);
     return 1;
   }
-  
+
   // default training intensity
-  unsigned train_intensity = 50;
-  if(argc == 3)
-      train_intensity = std::stoi(argv[2]);
+  unsigned train_intensity = 10;
+  if (argc == 3)
+    train_intensity = std::stoi(argv[2]);
 
   srand(time(NULL));
 
