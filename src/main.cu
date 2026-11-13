@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include <stdlib.h>
+#include <string>
 
 #define N 64
 
@@ -110,24 +111,26 @@ static void ClearGradients() {
   fcl.BackwardClear();
 }
 
-static void Learn() {
+static void Learn(unsigned train_intensity) {
   std::clog << "[LOG] Learning Process has begun" << std::endl;
 
-  for (int i = 0; i < data.train_size; i++) {
-    Image *image = &data.train_images[i];
+  unsigned int round = 0;
+  while(train_intensity > 0) {
+      std::clog << "Training Round " << round++ << std::endl;
 
-    std::clog << "[LOG] Training on label " << image->label << " | ";
-    ForwardPass(image);
-    std::clog << "Forward Pass Done | ";
-    
-    // clear gradients before computing error
-    ClearGradients();
+      for (int i = 0; i < data.train_size; i++) {
+        Image *image = &data.train_images[i];
 
-    ComputeError<<<10, 1>>>(fcl.g_pre_values, fcl.output, image->label, 10);
-    std::clog << "Error Computed | ";
+        ForwardPass(image);
+        
+        // clear gradients before computing error
+        ClearGradients();
+        ComputeError<<<10, 1>>>(fcl.g_pre_values, fcl.output, image->label, 10);
 
-    BackwardPass();
-    std::clog << "Backward Pass Done" << std::endl;
+        BackwardPass();
+      }
+
+      train_intensity--;
   }
 }
 
@@ -174,18 +177,23 @@ void LoadData(const char *root) {
 }
 
 int main(int argc, char **argv) {
-
-  if (argc != 2) {
+    
+  if (argc != 2 && argc != 3) {
     printf("Usage: %s <dataset-root>\n", argv[0]);
     return 1;
   }
-    
+  
+  // default training intensity
+  unsigned train_intensity = 50;
+  if(argc == 3)
+      train_intensity = std::stoi(argv[2]);
+
   srand(time(NULL));
 
   LoadData(argv[1]);
   std::cout << "[LOG] Data set is loaded successfully!" << std::endl;
 
-  Learn();
+  Learn(train_intensity);
   std::cout << "[LOG] Learning process is completed\n" << std::endl;
 
   float accuracy = Test();
