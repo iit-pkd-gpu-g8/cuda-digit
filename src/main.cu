@@ -41,11 +41,50 @@ static void ForwardPass(Image* image) {
 }
 
 static void BackwardPass() {
-
+    // clear gradients
+    il.BackwardClear();
+    cl.BackwardClear();
+    pl.BackwardClear();
+    fcl.BackwardClear();
+    
+    // Backward Propogation
+    
+    // Fully Connected Layer
+    BackwardFCLWeight<<<N, N>>>((float (*)[6][6][6]) fcl.g_weight, (float *) fcl.pre_values, (float (*)[6][6]) pl.output);
+    BackwardFCLBias<<<N, N>>>((float *) fcl.bias, (float *) fcl.g_pre_values);
+    
+    // Pooling Layer
+    BackwardPLOutput<<<N, N>>>((float (*)[6][6]) pl.g_output, (float (*)[6][6][6]) fcl.weight, (float *) fcl.g_pre_values);
+    BackwardPLPreActivate<<<N, N>>>((float (*)[6][6]) pl.g_pre_values, (float (*)[6][6]) pl.g_output, (float (*)[6][6]) pl.pre_values);
+    BackwardPLWeight<<<N, N>>>((float (*)[4][4]) pl.g_weight, (float (*)[6][6]) pl.g_weight, (float (*)[24][24]) cl.output);
+    BackwardPLBias<<<N, N>>>((float *) pl.bias, (float (*)[6][6]) pl.g_pre_values);
+    
+    // Convolutional Layer
+    BackwardCLOutput<<<N, N>>>((float (*)[24][24]) cl.g_output, (float (*)[4][4]) pl.weight, (float (*)[6][6]) pl.g_pre_values);
+    BackwardCLPreActivate<<<N, N>>>((float (*)[24][24]) cl.g_pre_values, (float (*)[24][24]) cl.g_output, (float (*)[24][24]) cl.pre_values);
+    BackwardCLWeight<<<N, N>>>((float (*)[5][5]) cl.g_weight, (float (*)[24][24]) cl.g_pre_values, (float (*)[28]) il.output);
+    BackwardCLBias<<<N, N>>>((float *) cl.bias, (float (*)[24][24]) cl.g_pre_values);
+    
+    // Modify Gradients
+    ApplyGradient<<<N, N>>>(fcl.weight, fcl.g_weight, fcl.on_size * fcl.in_size);
+    ApplyGradient<<<N, N>>>(pl.weight, pl.g_weight, pl.on_size * pl.in_size);
+    ApplyGradient<<<N, N>>>(cl.weight, cl.g_weight, cl.on_size * cl.in_size);
 }
 
 static unsigned int Decide() {
+    float prob[10]; // the last layer output is a simple table of probability
+    ForwardPass(data.train_images);
+    
+    // the label with the highest probability is chosen as the decision
+    unsigned int label = 0;
+    cudaMemcpy(prob, fcl.output, sizeof(float) * 10, cudaMemcpyDeviceToHost);
 
+    for(int i = 1; i < 10; i++) {
+        if(prob[i] > prob[label])
+            label = i;
+    }
+
+    return label;
 }
 
 static void Learn() {
