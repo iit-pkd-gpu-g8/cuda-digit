@@ -19,3 +19,7 @@ cuda-digit <dataset-root-directory> (optional) <train_intensity>
 
 ## Formatting
 * code-formatting is done using `clang-format`
+
+## Development
+* To see development of the project look at pull-requests which are closed/open/draft
+* Commits are squashed and merged into the main branch for keeping the version control system simple
