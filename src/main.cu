@@ -8,8 +8,8 @@
 
 Layer il = Layer(0, 0, 28 * 28);         // input layer
 Layer cl = Layer(5 * 5, 6, 6 * 24 * 24); // convolutional layer
-Layer pl = Layer(4 * 4, 6, 6 * 6 * 6);   // pooling layer
-Layer fcl = Layer(216, 10, 10);          // fully connected layer
+Layer pl = Layer(4 * 4, 1, 6 * 6 * 6);   // pooling layer
+Layer fcl = Layer(6 * 6 * 6, 10, 10);          // fully connected layer
 
 Data data; // variable into which the data set is loaded
 
@@ -46,11 +46,7 @@ static void ForwardPass(Image *image) {
 }
 
 static void BackwardPass() {
-  // clear gradients
-  il.BackwardClear();
-  cl.BackwardClear();
-  pl.BackwardClear();
-  fcl.BackwardClear();
+
 
   // Backward Propogation
 
@@ -107,6 +103,13 @@ static unsigned int Decide(Image *image) {
   return label;
 }
 
+static void ClearGradients() {
+  il.BackwardClear();
+  cl.BackwardClear();
+  pl.BackwardClear();
+  fcl.BackwardClear();
+}
+
 static void Learn() {
   std::clog << "[LOG] Learning Process has begun" << std::endl;
 
@@ -116,8 +119,11 @@ static void Learn() {
     std::clog << "[LOG] Training on label " << image->label << " | ";
     ForwardPass(image);
     std::clog << "Forward Pass Done | ";
+    
+    // clear gradients before computing error
+    ClearGradients();
 
-    ComputeError<<<N, N>>>(fcl.g_pre_values, fcl.output, image->label, 10);
+    ComputeError<<<10, 1>>>(fcl.g_pre_values, fcl.output, image->label, 10);
     std::clog << "Error Computed | ";
 
     BackwardPass();
@@ -173,6 +179,8 @@ int main(int argc, char **argv) {
     printf("Usage: %s <dataset-root>\n", argv[0]);
     return 1;
   }
+    
+  srand(time(NULL));
 
   LoadData(argv[1]);
   std::cout << "[LOG] Data set is loaded successfully!" << std::endl;

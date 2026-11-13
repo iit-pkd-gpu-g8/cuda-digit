@@ -10,8 +10,8 @@ Layer::Layer(int in_size, int on_size, int o_size) {
   this->o_size = o_size;
 
   // host side staged biasses that is copied to layer on device memory
-  float s_bias[in_size];
-  float s_weight[in_size][on_size];
+  float s_bias[on_size];
+  float s_weight[on_size][in_size];
 
   output = NULL;
   pre_values = NULL;
@@ -19,25 +19,25 @@ Layer::Layer(int in_size, int on_size, int o_size) {
   weight = NULL;
 
   // randomly generate bias and weight
-  for (int i = 0; i < in_size; i++) {
+  for (int i = 0; i < on_size; i++) {
     s_bias[i] = 0.5f - float(rand()) / float(RAND_MAX);
 
-    for (int j = 0; j < on_size; j++)
+    for (int j = 0; j < in_size; j++)
       s_weight[i][j] = 0.5f - float(rand()) / float(RAND_MAX);
   }
 
   // allocate device memory for layer variables
-  cudaMalloc(&this->output, sizeof(float) * on_size);
-  cudaMalloc(&this->pre_values, sizeof(float) * on_size);
-  cudaMalloc(&this->bias, sizeof(float) * in_size);
-  cudaMalloc(&this->weight, sizeof(float) * in_size * on_size);
-  cudaMalloc(&this->g_output, sizeof(float) * on_size);
-  cudaMalloc(&this->g_pre_values, sizeof(float) * on_size);
-  cudaMalloc(&this->g_weight, sizeof(float) * in_size * on_size);
+  cudaMalloc(&this->output, sizeof(float) * o_size);
+  cudaMalloc(&this->pre_values, sizeof(float) * o_size);
+  cudaMalloc(&this->bias, sizeof(float) * on_size);
+  cudaMalloc(&this->weight, sizeof(float) * on_size * in_size);
+  cudaMalloc(&this->g_output, sizeof(float) * o_size);
+  cudaMalloc(&this->g_pre_values, sizeof(float) * o_size);
+  cudaMalloc(&this->g_weight, sizeof(float) * on_size * in_size);
 
   // copy bias and weight
-  cudaMemcpy(bias, s_bias, sizeof(float) * in_size, cudaMemcpyHostToDevice);
-  cudaMemcpy(weight, s_weight, sizeof(float) * in_size * on_size,
+  cudaMemcpy(bias, s_bias, sizeof(float) * on_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(weight, s_weight, sizeof(float) * on_size * in_size,
              cudaMemcpyHostToDevice);
 }
 
