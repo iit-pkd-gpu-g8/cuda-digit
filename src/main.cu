@@ -56,7 +56,7 @@ static void BackwardPass() {
 
   // Fully Connected Layer
   BackwardFCLWeight<<<N, N>>>((float (*)[6][6][6])fcl.g_weight,
-                              (float *)fcl.pre_values,
+                              (float *)fcl.g_pre_values,
                               (float (*)[6][6])pl.output);
   BackwardFCLBias<<<N, N>>>((float *)fcl.bias, (float *)fcl.g_pre_values);
 
@@ -180,8 +180,10 @@ int main(int argc, char **argv) {
   Learn();
   std::cout << "[LOG] Learning process is completed\n" << std::endl;
 
-  Test();
+  float accuracy = Test();
   std::cout << "[LOG] Testing Process is completed\n" << std::endl;
+
+  std::cout << "[LOG] Accuracy of the CNN Model = " << accuracy << std::endl;
 
   return 0;
 }
