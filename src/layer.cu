@@ -74,32 +74,33 @@ void Layer::BackwardClear() {
 __device__ float Activate(float value) { return 1 / (1 + exp(-value)); }
 
 __global__ void ApplyActivate(float *input, float *output, int N) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  // Activate
-  for (int index = N * position / size; index < N * (position + 1) / size;
-       index++)
-    output[index] = Activate(input[index]);
+  // split work for threads by stride
+  for (int i = thread_id; i < N; i += stride)
+    output[i] = Activate(input[i]);
 }
 
 __global__ void ComputeError(float *error, float *output, unsigned int Y,
                              const int N) {
-  const int position = blockDim.x * blockIdx.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  for (int i = N * position / size; i < N * (position + 1) / size; ++i) {
-    error[i] = ((Y == i ? 1.0f : 0.0f) - output[i]);
+  // split work for threads by stride
+  for (int i = thread_id; i < N; i += stride) {
+    float target = (Y == (unsigned int)i) ? 1.0f : 0.0f;
+    error[i] = target - output[i];
   }
 }
 
 __global__ void ApplyGradient(float *output, float *grad, int N) {
-  const int pos = blockDim.x * blockIdx.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  for (int i = N * pos / size; i < N * (pos + 1) / size; ++i) {
+  // split work for threads by stride
+  for (int i = thread_id; i < N; i += stride)
     output[i] += dt * grad[i];
-  }
 }
 
 // CUDA Kernels
@@ -107,116 +108,108 @@ __global__ void ApplyGradient(float *output, float *grad, int N) {
 __global__ void ForwardCLPreActivate(float input[28][28],
                                      float pre_values[6][24][24],
                                      float weight[6][5][5]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 24 * 24;
 
-  int N = 5 * 5 * 6 * 24 * 24;
+  // distribute work for threads between channels, at height and width
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (24 * 24);
+    const int height = (i / 24) % 24;
+    const int width = i % 24;
 
-  // Convolution
-  for (int j = N * position / size; j < N * (position + 1) / size; j++) {
-    int index = j;
+    float result = 0.0f;
 
-    int i1 = ((index /= 1) % 5);
-    int i2 = ((index /= 5) % 5);
-    int i3 = ((index /= 5) % 6);
-    int i4 = ((index /= 6) % 24);
-    int i5 = ((index /= 24) % 24);
+    for (int j = 0; j < 5; j++) {
+      for (int k = 0; k < 5; k++)
+        result += weight[channel][j][k] * input[height + j][width + k];
+    }
 
-    // Accumulation
-    atomicAdd(&pre_values[i3][i4][i5],
-              weight[i3][i1][i2] * input[i4 + i1][i5 + i2]);
+    pre_values[channel][height][width] = result;
   }
 }
 
 __global__ void ForwardCLBias(float pre_values[6][24][24], float bias[6]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 24 * 24;
 
-  int N = 6 * 24 * 24;
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (24 * 24);
+    const int height = (i / 24) % 24;
+    const int width = i % 24;
 
-  for (int j = N * position / size; j < N * (position + 1) / size; j++) {
-    int index = j;
-
-    int i1 = (index % 6);
-    int i2 = ((index /= 6) % 24);
-    int i3 = ((index /= 24) % 24);
-
-    pre_values[i1][i2][i3] += bias[i1];
+    pre_values[channel][height][width] += bias[channel];
   }
 }
 
 __global__ void ForwardPLPreActivate(float input[6][24][24],
                                      float pre_values[6][6][6],
                                      float weight[1][4][4]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 6 * 6;
 
-  int N = 4 * 4 * 6 * 6 * 6;
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (6 * 6);
+    const int height = (i / 6) % 6;
+    const int width = i % 6;
 
-  // Pooling operation
-  for (int j = N * position / size; j < N * (position + 1) / size; j++) {
-    int index = j;
-    int i1 = ((index /= 1) % 4);
-    int i2 = ((index /= 4) % 4);
-    int i3 = ((index /= 4) % 6);
-    int i4 = ((index /= 6) % 6);
-    int i5 = ((index /= 6) % 6);
+    float result = 0.0f;
 
-    // Accumulation
-    atomicAdd(&pre_values[i3][i4][i5],
-              weight[0][i1][i2] * input[i3][i4 * 4 + i1][i5 * 4 + i2]);
+    for (int j = 0; j < 4; j++) {
+      for (int k = 0; k < 4; k++)
+        result +=
+            weight[0][j][k] * input[channel][height * 4 + j][width * 4 + k];
+    }
+
+    pre_values[channel][height][width] = result;
   }
 }
 
 __global__ void ForwardPLBias(float pre_values[6][6][6], float bias[1]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 6 * 6;
 
-  int N = 6 * 6 * 6;
+  // split work among threads with strided offset
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (6 * 6);
+    const int height = (i / 6) % 6;
+    const int width = i % 6;
 
-  // Add bias
-  for (int j = N * position / size; j < N * (position + 1) / size; j++) {
-    int index = j;
-
-    int i1 = ((index /= 1) % 6);
-    int i2 = ((index /= 6) % 6);
-    int i3 = ((index /= 6) % 6);
-
-    pre_values[i1][i2][i3] += bias[0];
+    // add shared bias to pre activation value
+    pre_values[channel][height][width] += bias[0];
   }
 }
 
 __global__ void ForwardFCLPreActivate(float input[6][6][6],
                                       float pre_values[10],
                                       float weight[10][6][6][6]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  int N = 10 * 6 * 6 * 6;
+  for (int i = thread_id; i < 10; i += stride) {
+    float result = 0.0f;
 
-  // Fully connected operation
-  for (int j = N * position / size; j < N * (position + 1) / size; j++) {
-    int index = j;
-    int i1 = ((index /= 1) % 10);
-    int i2 = ((index /= 10) % 6);
-    int i3 = ((index /= 6) % 6);
-    int i4 = ((index /= 6) % 6);
+    for (int channel = 0; channel < 6; channel++) {
+      for (int height = 0; height < 6; height++) {
+        for (int width = 0; width < 6; width++)
+          result +=
+              weight[i][channel][height][width] * input[channel][height][width];
+      }
+    }
 
-    // Accumulation
-    atomicAdd(&pre_values[i1], weight[i1][i2][i3][i4] * input[i2][i3][i4]);
+    pre_values[i] = result;
   }
 }
 
 __global__ void ForwardFCLBias(float pre_values[10], float bias[10]) {
-  int position = blockIdx.x * blockDim.x + threadIdx.x;
-  int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  int N = 10;
-
-  // Add bias
-  for (int index = N * position / size; index < N * (position + 1) / size;
-       index++)
-    pre_values[index] += bias[index];
+  for (int i = thread_id; i < 10; i += stride)
+    pre_values[i] += bias[i];
 }
 
 // Backward Propogation
@@ -224,199 +217,213 @@ __global__ void ForwardFCLBias(float pre_values[10], float bias[10]) {
 __global__ void BackwardFCLWeight(float g_weight[10][6][6][6],
                                   float g_pre_values[10],
                                   float p_output[6][6][6]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 10 * 6 * 6 * 6;
 
-  const int N = 10 * 6 * 6 * 6;
+  // split work by stride and indexing by converting iterator to 4D co-ords
+  for (int i = thread_id; i < total; i += stride) {
+    const int idx_1 = i / (6 * 6 * 6);
+    const int rem_1 = i % (6 * 6 * 6);
 
-  // Compute weight gradients
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 10);
-    const int i2 = ((index /= 10) % 6);
-    const int i3 = ((index /= 6) % 6);
-    const int i4 = ((index /= 6) % 6);
+    const int idx_2 = rem_1 / (6 * 6);
+    const int rem_2 = rem_1 % (6 * 6);
 
-    g_weight[i1][i2][i3][i4] = g_pre_values[i1] * p_output[i2][i3][i4];
+    const int idx_3 = rem_2 / 6;
+    const int idx_4 = rem_2 % 6;
+
+    g_weight[idx_1][idx_2][idx_3][idx_4] =
+        g_pre_values[idx_1] * p_output[idx_2][idx_3][idx_4];
   }
 }
 
 __global__ void BackwardFCLBias(float bias[10], float g_pre_values[10]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  const int N = 10;
-
-  // Update bias with gradients
-  for (int index = N * position / size; index < N * (position + 1) / size;
-       ++index)
-    bias[index] += dt * g_pre_values[index];
+  for (int i = thread_id; i < 10; i += stride)
+    bias[i] += dt * g_pre_values[i];
 }
 
 // Pooling Layer
 __global__ void BackwardPLOutput(float g_output[6][6][6],
                                  float n_weight[10][6][6][6],
                                  float ng_pre_values[10]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
 
-  const int N = 10 * 6 * 6 * 6;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 6 * 6;
 
-  // Propagate error backward from the next (FC) layer
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 10);
-    const int i2 = ((index /= 10) % 6);
-    const int i3 = ((index /= 6) % 6);
-    const int i4 = ((index /= 6) % 6);
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (6 * 6);
+    const int height = (i / 6) % 6;
+    const int width = i % 6;
 
-    atomicAdd(&g_output[i2][i3][i4],
-              n_weight[i1][i2][i3][i4] * ng_pre_values[i1]);
+    float result = 0.0f;
+
+    for (int j = 0; j < 10; j++)
+      result += n_weight[j][channel][height][width] * ng_pre_values[j];
+
+    g_output[channel][height][width] = result;
   }
 }
 
 __global__ void BackwardPLPreActivate(float g_pre_values[6][6][6],
                                       float g_output[6][6][6],
                                       float pre_values[6][6][6]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 6 * 6;
 
-  const int N = 6 * 6 * 6;
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (6 * 6);
+    const int height = (i / 6) % 6;
+    const int width = i % 6;
 
-  // Gradient of pre-activation
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 6);
-    const int i2 = ((index /= 6) % 6);
-    const int i3 = ((index /= 6) % 6);
-
-    const float o = Activate(pre_values[i1][i2][i3]);
-
-    g_pre_values[i1][i2][i3] = g_output[i1][i2][i3] * o * (1 - o);
+    float out = Activate(pre_values[channel][height][width]);
+    g_pre_values[channel][height][width] =
+        g_output[channel][height][width] * out * (1.0f - out);
   }
 }
 
 __global__ void BackwardPLWeight(float g_weight[1][4][4],
                                  float g_pre_values[6][6][6],
                                  float p_output[6][24][24]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
 
-  const int N = 1 * 4 * 4 * 6 * 6 * 6;
-  const float d = powf(6.0f, 3.0f); // Normalization factor
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 4 * 4;
 
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 1);
-    const int i2 = ((index /= 1) % 4);
-    const int i3 = ((index /= 4) % 4);
-    const int i4 = ((index /= 4) % 6);
-    const int i5 = ((index /= 6) % 6);
-    const int i6 = ((index /= 6) % 6);
+  // normalization factor
+  const float nf = 216.0f;
 
-    atomicAdd(&g_weight[i1][i2][i3],
-              g_pre_values[i4][i5][i6] *
-                  p_output[i4][i5 * 4 + i2][i6 * 4 + i3] / d);
+  for (int i = thread_id; i < total; i += stride) {
+    int j = i / 4;
+    int k = i % 4;
+
+    float result = 0.0f;
+    for (int channel = 0; channel < 6; channel++) {
+      for (int height = 0; height < 6; height++) {
+        for (int width = 0; width < 6; width++)
+          result += g_pre_values[channel][height][width] *
+                    p_output[channel][height * 4 + j][width * 4 + k];
+      }
+    }
+    g_weight[0][j][k] = result / nf;
   }
 }
 
 __global__ void BackwardPLBias(float bias[1], float g_pre_values[6][6][6]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
 
-  const int N = 6 * 6 * 6;
-  const float d = powf(6.0f, 3.0f); // Normalization factor
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 6 * 6;
 
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 6);
-    const int i2 = ((index /= 6) % 6);
-    const int i3 = ((index /= 6) % 6);
+  // normaliation factor
+  const float nf = 216.0f;
 
-    atomicAdd(&bias[0], dt * g_pre_values[i1][i2][i3] / d);
+  float result = 0.0f;
+
+  for (int i = thread_id; i < total; i += stride) {
+    const int channel = i / (6 * 6);
+    const int height = (i / 6) % 6;
+    const int width = i % 6;
+
+    result += g_pre_values[channel][height][width];
   }
+
+  atomicAdd(&bias[0], dt * result / nf);
 }
 
 // Convolution Layer
 __global__ void BackwardCLOutput(float g_output[6][24][24],
                                  float n_weight[1][4][4],
                                  float ng_pre_values[6][6][6]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 24 * 24;
 
-  const int N = 1 * 4 * 4 * 6 * 6 * 6;
+  for (int i = thread_id; i < total; i += stride) {
+    int channel = i / (24 * 24);
+    int height = (i / 24) % 24;
+    int width = i % 24;
 
-  // Propagate error backward from the next (pooling) layer
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 1);
-    const int i2 = ((index /= 1) % 4);
-    const int i3 = ((index /= 4) % 4);
-    const int i4 = ((index /= 4) % 6);
-    const int i5 = ((index /= 6) % 6);
-    const int i6 = ((index /= 6) % 6);
+    float result = 0.0f;
 
-    atomicAdd(&g_output[i4][i5 * 4 + i2][i6 * 4 + i3],
-              n_weight[i1][i2][i3] * ng_pre_values[i4][i5][i6]);
+    for (int j = 0; j < 6; j++) {
+      for (int k = 0; k < 6; k++) {
+        int x = height - j * 4;
+        int y = width - k * 4;
+
+        if (x >= 0 && x < 4 && y >= 0 && y < 4)
+          result += n_weight[0][x][y] * ng_pre_values[channel][j][k];
+      }
+    }
+
+    g_output[channel][height][width] = result;
   }
 }
 
 __global__ void BackwardCLPreActivate(float g_pre_values[6][24][24],
                                       float g_output[6][24][24],
                                       float pre_values[6][24][24]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
+  const int total = 6 * 24 * 24;
 
-  const int N = 6 * 24 * 24;
+  for (int i = thread_id; i < total; i += stride) {
+    int channel = i / (24 * 24);
+    int height = (i / 24) % 24;
+    int width = i % 24;
 
-  // Gradient of pre-activation (sigmoid derivative)
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 6);
-    const int i2 = ((index /= 6) % 24);
-    const int i3 = ((index /= 24) % 24);
-
-    const float o = Activate(pre_values[i1][i2][i3]);
-
-    g_pre_values[i1][i2][i3] = g_output[i1][i2][i3] * o * (1 - o);
+    float out = Activate(pre_values[channel][height][width]);
+    g_pre_values[channel][height][width] =
+        g_output[channel][height][width] * out * (1.0f - out);
   }
 }
 
 __global__ void BackwardCLWeight(float g_weight[6][5][5],
                                  float g_pre_values[6][24][24],
                                  float p_output[28][28]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  const int N = 6 * 5 * 5 * 24 * 24;
-  const float d = powf(24.0f, 2.0f); // Normalization factor
+  // total work and normalization factor
+  const int total = 6 * 5 * 5;
+  const float nf = 576.0f;
 
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 6);
-    const int i2 = ((index /= 6) % 5);
-    const int i3 = ((index /= 5) % 5);
-    const int i4 = ((index /= 5) % 24);
-    const int i5 = ((index /= 24) % 24);
+  for (int i = thread_id; i < total; i += stride) {
+    int channel = i / (5 * 5);
+    int rem = i % (5 * 5);
 
-    atomicAdd(&g_weight[i1][i2][i3],
-              g_pre_values[i1][i4][i5] * p_output[i4 + i2][i5 + i3] / d);
+    int j = rem / 5;
+    int k = rem % 5;
+
+    float result = 0.0f;
+
+    for (int x = 0; x < 24; x++) {
+      for (int y = 0; y < 24; y++)
+        result += g_pre_values[channel][x][y] * p_output[x + j][y + k];
+    }
+
+    g_weight[channel][j][k] = result / nf;
   }
 }
 
 __global__ void BackwardCLBias(float bias[6], float g_pre_values[6][24][24]) {
-  const int position = blockIdx.x * blockDim.x + threadIdx.x;
-  const int size = blockDim.x * gridDim.x;
+  const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = blockDim.x * gridDim.x;
 
-  const int N = 6 * 24 * 24;
-  const float d = powf(24.0f, 2.0f); // Normalization factor
+  // normalization factor
+  const float nf = 576.0f;
 
-  for (int n = N * position / size; n < N * (position + 1) / size; ++n) {
-    int index = n;
-    const int i1 = ((index /= 1) % 6);
-    const int i2 = ((index /= 6) % 24);
-    const int i3 = ((index /= 24) % 24);
+  for (int channel = thread_id; channel < 6; channel += stride) {
+    float result = 0.0f;
+    for (int height = 0; height < 24; height++) {
+      for (int width = 0; width < 24; width++)
+        result += g_pre_values[channel][height][width];
+    }
 
-    atomicAdd(&bias[i1], dt * g_pre_values[i1][i2][i3] / d);
+    bias[channel] += dt * result / nf;
   }
 }
